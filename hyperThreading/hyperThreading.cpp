@@ -1,4 +1,5 @@
 ﻿#include <iostream>
+#include <fstream>
 #include <Windows.h>
 #include <mutex>
 #include <thread>
@@ -12,6 +13,13 @@ static bool inf[10] = {true, true, true, true,  true, true,  true, true,  true, 
 static bool s = false;
 static int sticks = 5;
 static std::timed_mutex mutex;
+HANDLE hSemSpace;
+HANDLE hSemData;
+HANDLE hSemReader;
+HANDLE hSemWriter;
+HANDLE hSemWriterFile;
+int indexWriter = 0;
+int indexReader = 0;
 
 public ref class Example {
 public:
@@ -72,13 +80,6 @@ public:
     }
 };
 
-HANDLE hSemSpace = CreateSemaphore(NULL, arraySize, arraySize, NULL);
-HANDLE hSemData = CreateSemaphore(NULL, 0, arraySize, NULL);
-HANDLE hSemReader = CreateSemaphore(NULL, 1, 2, NULL);
-HANDLE hSemWriter = CreateSemaphore(NULL, 1, 2, NULL);
-int indexWriter = 0;
-int indexReader = 0;
-
 public ref class ExampleFourth {
 public:
     static void Writer1(char name) {
@@ -131,8 +132,11 @@ public:
             WaitForMultipleObjects(2, h, true, INFINITE);
             array[indexWriter % arraySize] = indexWriter * 121 / 32;
             indexWriter++;
+            if ((indexWriter % arraySize == 0 && indexWriter / arraySize >= 1))
+                ReleaseSemaphore(hSemWriterFile, 1, NULL);
+            else
+                ReleaseSemaphore(hSemWriter, 1, NULL);
             ReleaseSemaphore(hSemData, 1, NULL);
-            ReleaseSemaphore(hSemWriter, 1, NULL);
         } 
     }
     static void Writer2(char name) {
@@ -141,8 +145,11 @@ public:
             WaitForMultipleObjects(2, h, true, INFINITE);
             array[indexWriter % arraySize] = indexWriter * 121 / 32;
             indexWriter++;
+            if ((indexWriter % arraySize == 0 && indexWriter / arraySize >= 1))
+                ReleaseSemaphore(hSemWriterFile, 1, NULL);
+            else
+                ReleaseSemaphore(hSemWriter, 1, NULL);
             ReleaseSemaphore(hSemData, 1, NULL);
-            ReleaseSemaphore(hSemWriter, 1, NULL);
         }
     }
     static void Reader1(char name) {
@@ -163,6 +170,23 @@ public:
             indexReader++;
             ReleaseSemaphore(hSemSpace, 1, NULL);
             ReleaseSemaphore(hSemReader, 1, NULL);
+        }
+    }
+    static void WriteFile() {
+        std::ofstream of;
+        of.open("journal.txt", std::ios::out);
+        of.close();
+        while (indexReader < 20) {
+            DWORD word = WaitForSingleObject(hSemWriterFile, 200);
+            if (word != WAIT_TIMEOUT) {
+                std::ofstream of;
+                of.open("journal.txt", std::ios::app);
+                for (int i = 0; i < arraySize; i++) {
+                    of << array[i] << std::endl;
+                }
+                of.close();
+            }
+            ReleaseSemaphore(hSemWriter, 1, NULL);
         }
     }
 };
@@ -200,6 +224,10 @@ void Third() {
 }
 
 void Fourth() {
+    hSemSpace = CreateSemaphore(NULL, arraySize, arraySize, NULL);
+    hSemData = CreateSemaphore(NULL, 0, arraySize, NULL);
+    hSemReader = CreateSemaphore(NULL, 1, 2, NULL);
+    hSemWriter = CreateSemaphore(NULL, 1, 2, NULL);
     std::thread oT1(ExampleFourth::Writer1, 'A');
     std::thread oT2(ExampleFourth::Writer2, 'B');
     std::thread iT1(ExampleFourth::Reader1, 'A');
@@ -212,15 +240,22 @@ void Fourth() {
 }
 
 void Fifth() {
+    hSemSpace = CreateSemaphore(NULL, arraySize, arraySize, NULL);
+    hSemData = CreateSemaphore(NULL, 0, arraySize, NULL);
+    hSemReader = CreateSemaphore(NULL, 1, 2, NULL);
+    hSemWriter = CreateSemaphore(NULL, 1, 2, NULL);
+    hSemWriterFile = CreateSemaphore(NULL, 0, 2, NULL);
     std::thread oT1(ExampleFifth::Writer1, 'A');
     std::thread oT2(ExampleFifth::Writer2, 'B');
     std::thread iT1(ExampleFifth::Reader1, 'A');
     std::thread iT2(ExampleFifth::Reader2, 'B');
+    std::thread iT3(ExampleFifth::WriteFile);
 
     oT1.join();
     oT2.join();
     iT1.join();
     iT2.join();
+    iT3.join();
 }
 
 int main()
